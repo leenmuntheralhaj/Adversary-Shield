@@ -1,8 +1,8 @@
 Adversary Shield — Setup & Access Guide
 Prerequisites
-Download all project files including the dataset CSV files and the Test_inject folder before proceeding.
+Download all project files including the dataset CSV files and the test folder before proceeding.
 Setup Steps
-1.Datasets are in this folder: https://drive.google.com/drive/folders/1crMDeJjkZKLbMyqIOxODt1IVTT1cXkfX?usp=drive_link
+1.Datasets are in this folder: https://drive.google.com/drive/folders/1crMDeJjkZKLbMyqIOxODt1IVTT1cXkfX?usp=drive_link download them before you start
 2. Prepare the dataset
 Run GP2.py to process and load the model before starting the application.
 3. Configure email for OTP
