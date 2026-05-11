@@ -2,18 +2,18 @@ console.log("script.js loaded");
 
 const API_BASE = "http://127.0.0.1:5000";
 const LIMITS = {
-  fetchEvents: 2000, fetchAlerts: 2000, dashboardEvents: 50, dashboardAlerts: 50,
-  alertsPage: 2000, drSuspicious: 300, drResponses: 2000, drWindow: 5000
+  fetchEvents: 10000, fetchAlerts: 10000, dashboardEvents: 50, dashboardAlerts: 50,
+  alertsPage: 10000, drSuspicious: 1000, drResponses: 2000, drWindow: 5000
 };
-
-let currentUser = null, pollTimer = null, demoRunning = false;
+let currentUser = null, pollTimer = null, demoRunning = false, lastDemoRunning = false;
+let _sessionStartEventId = 0, _sessionStartAlertId = 0;
 let chartTimeline = null, chartAttackDist = null, chartConfidence = null, chartEUSBanner = null;
 window._socActions = [];
 
 const USERS = {
-  soc:   { pass: "Soc@12345!",   role: "SOC", email: "youremail@gmail.com" },
-  cmp:   { pass: "Cmp@12345!",   role: "CMP", email: "youremail@gmail.com" },
-  euser: { pass: "Euser@12345!", role: "EUS", email: "youremail@gmail.com" },
+  soc:   { pass: "Soc@12345!",   role: "SOC", email: "youremail4@gmail.com" },
+  cmp:   { pass: "Cmp@12345!",   role: "CMP", email: "youremail4@gmail.com" },
+  euser: { pass: "Euser@12345!", role: "EUS", email: "youremail4@gmail.com" },
 }; //write your email 
 
 // ── EUS AWARENESS CAROUSEL ──────────────────────────────────────────────────
@@ -161,13 +161,13 @@ function applyRBAC(role) {
   if (role === "CMP") document.getElementById("btnExportAuditLog")?.classList.remove("d-none");
 
   if (role === "EUS") {
-    ["dashCharts","dashEventsTables","dashSystemOverview"].forEach(id => document.getElementById(id)?.classList.add("d-none"));
+    ["dashCharts","dashEventsTables","dashSystemOverview","dashKPIs"].forEach(id => document.getElementById(id)?.classList.add("d-none"));
     document.getElementById("dashEUSBanner")?.classList.remove("d-none");
     initEUSCarousel();
   }
 
   if (role === "CMP") {
-    ["dashCharts","dashEventsTables","dashSystemOverview","dashEUSBanner"].forEach(id => document.getElementById(id)?.classList.add("d-none"));
+    ["dashCharts","dashEventsTables","dashSystemOverview","dashEUSBanner","dashKPIs"].forEach(id => document.getElementById(id)?.classList.add("d-none"));
     document.getElementById("dashCMPBanner")?.classList.remove("d-none");
   }
 
@@ -182,6 +182,14 @@ function applyRBAC(role) {
       table th.col-ip-status, table th.col-last-action { display:none !important; }`;
     document.head.appendChild(style);
   }
+// ── REPORT FILTER DELEGATION ──────────────────────────────────────────────
+
+document.addEventListener("input", function(e) {
+  const filterIds = ["filterDateFrom","filterDateTo","filterAttackType","filterSeverity"];
+  if (filterIds.includes(e.target.id)) {
+    window.applyReportFilters();
+  }
+});
 
   // Attach filter change listeners so filters work without relying on HTML onchange
   ["alertsIpFilter","alertsTypeFilter","alertsSeverityFilter","alertsStatusFilter"]
@@ -198,30 +206,40 @@ function _setDemoUI(running) {
   document.getElementById("demoStartBtn")?.classList.toggle("d-none",  running);
   document.getElementById("demoStopBtn") ?.classList.toggle("d-none", !running);
 }
-
 window.startDemoGeneratorAPI = async function() {
   try {
-    const data = await (await fetch(`${API_BASE}/start_demo`, {method:"POST"})).json();
+    const data = await (await fetch(`${API_BASE}/start_demo`, { method: "POST" })).json();
     if (data.status === "success") {
+      _sessionStartEventId = data.max_event_id || 0;
+      _sessionStartAlertId = data.max_alert_id || 0;
+      lastDemoRunning = true;
       _setDemoUI(true);
       if (!pollTimer) startPolling();
-    } else { alert("Error starting demo: " + data.message); }
-  } catch(e) { alert("Could not connect to the backend server."); }
+    } else {
+      alert("Error starting demo: " + data.message);
+    }
+  } catch(e) {
+    alert("Could not connect to the backend server.");
+  }
 };
-
-// FIX: stop demo always resets UI, even on network error
-
-
 function stopDemoGeneratorAPI() {
-  fetch(API_BASE + "/stop_demo", { method: "POST" })
-    .then(res => res.json())
-    .then(() => {
-      demoRunning = false;
-      document.getElementById("demoStartBtn").classList.remove("d-none");
-      document.getElementById("demoStopBtn").classList.add("d-none");
-      if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+  fetch(`${API_BASE}/stop_demo`, { method: "POST" })
+    .then(r => r.json())
+    .then(data => {
+      _sessionStartEventId = data.max_event_id || _sessionStartEventId;
+      _sessionStartAlertId = data.max_alert_id || _sessionStartAlertId;
     })
-    .catch(err => console.error(err));
+    .catch(err => console.error("stop_demo error:", err));
+
+  demoRunning     = false;
+  lastDemoRunning = false;
+  _setDemoUI(false);
+  if (currentUser?.role === "SOC") stopPolling();
+
+  if (eusCarouselTimer) {
+    clearTimeout(eusCarouselTimer);
+    eusCarouselTimer = null;
+  }
 }
 window.stopDemoGeneratorAPI = stopDemoGeneratorAPI;
 // ── PAGE NAV ─────────────────────────────────────────────────────────────────
@@ -300,13 +318,19 @@ function eusResponseLabel(a) {
   if (a.last_action === "rate_limit")  return "Traffic Rate-Limited";
   if (a.last_action === "investigate") return "Under Investigation";
   if (a.last_action === "allow")       return "Reviewed — Marked Safe";
-  return "Flagged — Awaiting SOC Review";
+  if (a.risk === "Critical")           return "Critical Threat — Flagged for Immediate Review";
+  if (a.risk === "High")               return "High Risk — Flagged for SOC Review";
+  if (a.risk === "Medium")             return "Flagged — Awaiting SOC Review";
+  return "Logged — Under Monitoring";
 }
 function eusStatusLabel(a) {
   if (a.ip_status==="Blocked" || a.last_action==="block") return "Resolved";
   if (a.last_action) return "In Progress";
+  if (a.risk === "Critical") return "Critical";
+  if (a.risk === "High")     return "Elevated";
   return "Monitoring";
 }
+
 
 window.manualRefresh = () => pollOnce();
 
@@ -346,7 +370,32 @@ window.exportAlerts = function() {
     `alerts_${new Date().toISOString().slice(0,10)}.csv`
   );
 };
+window.downloadAttackEvidence = function(label) {
+  const all = mergeLocalActions(window._lastAlerts || []);
+  const rows = all.filter(a => a.prediction === label);
 
+  if (!rows.length) {
+    alert("No alerts found for: " + label);
+    return;
+  }
+
+  const cols = ["id", "timestamp", "src_ip", "dst_ip", "prediction",
+                "protocol", "confidence", "risk", "is_attack",
+                "ip_status", "last_action", "last_action_time"];
+
+  const csv = [
+    cols.join(","),
+    ...rows.map(r =>
+      cols.map(c => {
+        if (c === "protocol") return JSON.stringify(getProtocol(r.prediction) || "");
+        return JSON.stringify(r[c] ?? "");
+      }).join(",")
+    )
+  ].join("\n");
+
+  const filename = `${label.replace(/\s+/g, "_")}_evidence_${new Date().toISOString().slice(0, 10)}.csv`;
+  _dlBlob(new Blob([csv], { type: "text/csv" }), filename);
+};
 window.exportResponses = function() {
   const rows = window._lastResponses||[]; if (!rows.length){alert("No response actions to export yet.");return;}
   const cols = ["id","timestamp","ip","action","status","note"];
@@ -852,19 +901,37 @@ function applyReportHeaders() {
   document.getElementById("reportFilters")?.classList.toggle("d-none",role==="SOC");
   const socThead=document.getElementById("socReportThead"); if (!socThead) return;
   if (role==="SOC") {
-    socThead.innerHTML=`<tr><th>Report ID</th><th>Timestamp</th><th>Source IP</th><th>Attack Type</th><th>Protocol</th><th>Detection Type</th><th>Target System</th><th>Confidence Score</th></tr>`;
   } else if (role==="CMP") {
-    socThead.innerHTML=`<tr><th>Report ID</th><th>Timestamp</th><th>Detection Category</th><th>Applied Security Policy</th><th>Action Taken</th><th>Action Status</th></tr>`;
+    socThead.innerHTML=`<tr><th>Report ID</th><th>Timestamp</th><th>Detection Category</th><th>Recommended Security Policy</th><th>Action Taken</th><th>Action Status</th><th>Severity</th></tr>`;
   } else {
     socThead.innerHTML=`<tr><th>Report ID</th><th>Timestamp</th><th>Threat Summary</th><th>System Response</th><th>Final Status</th></tr>`;
   }
-  const sel=document.getElementById("filterAttackType"); if (!sel) return;
-  sel.innerHTML=`<option value="">All Types</option>`+["DoS","DDoS","PortScan","Web Attack","Brute Force","Botnet"].map(o=>`<option value="${o}">${o}</option>`).join("");
+  const sel=document.getElementById("filterAttackType");
+  if (sel) {
+    sel.innerHTML=`<option value="">All Types</option>`+["DoS","DDoS","PortScan","Web Attack","Brute Force","Botnet"].map(o=>`<option value="${o}">${o}</option>`).join("");
+  }
 
-  const sevSel=document.getElementById("filterSeverity"); if (!sevSel) return;
-  sevSel.innerHTML=`<option value="">All Severities</option>`+["Critical","High","Medium","Low"].map(o=>`<option value="${o}">${o}</option>`).join("");
+  const sevSel = document.getElementById("filterSeverity");
+if (sevSel) {
+  if (role === "CMP") {
+    sevSel.innerHTML = `<option value="">All Severities</option>` +
+      ["Critical","High","Medium","Low"].map(o => `<option value="${o}">${o}</option>`).join("");
+    sevSel.closest(".col-12").classList.remove("d-none");
+  } else {
+    sevSel.value = "";
+    sevSel.closest(".col-12").classList.add("d-none");
+  }
 }
-
+  ["filterDateFrom","filterDateTo","filterAttackType","filterSeverity"]
+    .forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      const fresh = el.cloneNode(true);
+      el.parentNode.replaceChild(fresh, el);
+      fresh.addEventListener("change", window.applyReportFilters);
+      fresh.addEventListener("input",  window.applyReportFilters);
+    });
+}
 window.downloadAllAttacksReport = function() {
   const all = mergeLocalActions(window._lastAlerts || []);
   if (!all.length) { alert("No alert data available yet."); return; }
@@ -1042,18 +1109,26 @@ function cmpStatus(a) {
 }
 
 window.applyReportFilters = function() {
-  let f=mergeLocalActions(window._lastAlerts||[]);
-  const dF=document.getElementById("filterDateFrom")?.value;
-  const dT=document.getElementById("filterDateTo")?.value;
-  const ty=(document.getElementById("filterAttackType")?.value||"").toLowerCase();
-  const sv=document.getElementById("filterSeverity")?.value||"";
-  if (dF) f=f.filter(a=>new Date(a.timestamp)>=new Date(dF));
-  if (dT) f=f.filter(a=>new Date(a.timestamp)<=new Date(dT+"T23:59:59"));
-  if (ty) f=f.filter(a=>(a.prediction||"").toLowerCase().includes(ty));
-  if (sv) f=f.filter(a=>(a.risk||"").toLowerCase()===sv.toLowerCase());
+  const dF = document.getElementById("filterDateFrom")?.value    || "";
+  const dT = document.getElementById("filterDateTo")?.value      || "";
+  const ty = (document.getElementById("filterAttackType")?.value || "").toLowerCase();
+  const sv = (document.getElementById("filterSeverity")?.value   || "");
+
+  let f = mergeLocalActions(window._lastAlerts || []);
+
+  if (dF) f = f.filter(a => new Date(a.timestamp) >= new Date(dF));
+  if (dT) f = f.filter(a => new Date(a.timestamp) <= new Date(dT + "T23:59:59"));
+  if (ty) f = f.filter(a => (a.prediction || "").toLowerCase().includes(ty));
+  if (sv) f = f.filter(a => a.risk === sv);
+
   renderRoleReport(f);
 };
 
+window.clearReportFilters = function() {
+  ["filterDateFrom", "filterDateTo", "filterAttackType", "filterSeverity"]
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ""; });
+  applyReportFilters();
+};
 function renderRoleReport(alerts=mergeLocalActions(window._lastAlerts||[])) {
   const role=currentUser?.role, el=document.getElementById("roleReportBody"); if (!el) return;
   if (role==="SOC") {
@@ -1067,11 +1142,13 @@ function renderRoleReport(alerts=mergeLocalActions(window._lastAlerts||[])) {
       <td>${escapeHtml(a.dst_ip||"N/A")}</td>
       <td>${escapeHtml(a.confidence)}%</td>
     </tr>`).join("");
-  } else if (role==="CMP") {
+  }else if (role==="CMP") {
     el.innerHTML=alerts.map((a,i)=>{ const cat=cmpCategory(a.prediction); return `<tr>
       <td>CMP-${String(i+1).padStart(3,"0")}</td><td>${new Date(a.timestamp).toLocaleString()}</td>
       <td>${escapeHtml(cat)}</td><td>${escapeHtml(cmpPolicy(cat))}</td>
-      <td>${escapeHtml(cmpAction(a))}</td><td>${escapeHtml(cmpStatus(a))}</td></tr>`;}).join("");
+      <td>${escapeHtml(cmpAction(a))}</td><td>${escapeHtml(cmpStatus(a))}</td>
+      <td>${badgeRisk(a.risk)}</td></tr>`;}).join("");
+      
   } else {
     // FIX: use shared eusResponseLabel — no more "Auto-Mitigated"
     el.innerHTML=alerts.map((a,i)=>`<tr>
@@ -1129,11 +1206,10 @@ window.printReport = function() {
   doc.setFontSize(14); doc.setFont("helvetica", "bold");
   doc.text(roleTitle, 10, 16);
   doc.setFontSize(8); doc.setFont("helvetica", "normal");
-  if (dF || dT) doc.text(`Period: ${dF || "—"}  →  ${dT || "—"}`, 10, 21);
+  if (dF || dT) doc.text(`Period: ${dF || "N/A"}  to  ${dT || "N/A"}`, 10, 21);
   doc.text(`Generated: ${now}`, 200, 9,  { align: "right" });
   doc.text(`Role: ${role}`,     200, 14, { align: "right" });
   doc.text(`Records: ${Math.min(total, 300)} of ${total}`, 200, 19, { align: "right" });
-
   // ── KPI boxes ─────────────────────────────
   const kpis = [
     { label: "TOTAL ALERTS", value: total,    bg: [238,242,255], fg: [30,30,180]  },
@@ -1174,13 +1250,13 @@ window.printReport = function() {
   // ── Role detail table ─────────────────────
   let detailHead, detailBody;
   if (role === "CMP") {
-    detailHead = [["Report ID", "Timestamp", "Detection Category", "Applied Security Policy", "Action Taken", "Status"]];
+    detailHead = [["Report ID", "Timestamp", "Detection Category", "Recommended Security Policy", "Action Taken", "Action Status", "Severity"]];
     detailBody = f.map((a, i) => {
       const cat = cmpCategory(a.prediction);
       return [
         `CMP-${String(i + 1).padStart(4, "0")}`,
         new Date(a.timestamp).toLocaleString(),
-        cat, cmpPolicy(cat), cmpAction(a), cmpStatus(a),
+        cat, cmpPolicy(cat), cmpAction(a), cmpStatus(a), a.risk || "—",
       ];
     });
   } else {
@@ -1221,7 +1297,6 @@ window.printReport = function() {
 
   doc.save(`${prefix}_report_${new Date().toISOString().slice(0, 10)}.pdf`);
 };
-
 // ── POLLING ───────────────────────────────────────────────────────────────────
 async function pollOnce() {
   try {
@@ -1242,6 +1317,7 @@ async function pollOnce() {
 }
 function startPolling() { stopPolling(); pollOnce(); pollTimer=setInterval(pollOnce,2000); }
 function stopPolling()  { clearInterval(pollTimer); pollTimer=null; }
+
 
 // ── DETECTION & RESPONSE ─────────────────────────────────────────────────────
 window.refreshDR = async function() {
@@ -1343,4 +1419,9 @@ window.addEventListener("keydown", e => {
   const lp=document.getElementById("loginPage");
   if (e.key==="Enter" && lp && !lp.classList.contains("d-none"))
     document.getElementById("loginStep2")?.classList.contains("d-none")===false ? verifyOTP() : login();
+});
+window.addEventListener("beforeunload", () => {
+  if (demoRunning) {
+    navigator.sendBeacon(`${API_BASE}/stop_demo`);
+  }
 });
