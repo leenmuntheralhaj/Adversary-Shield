@@ -115,8 +115,9 @@ def get_standardized_label(raw_label):
     # Catch-all for anything unexpected
     return 'Other'
 
+
 # =========================================================
-# 3. RUN BRUTAL SIMULATION
+# 3. RUN BRUTAL SIMULATION (UPDATED)
 # =========================================================
 def run_simulation():
     print("\n=== STARTING BLACK-BOX BRUTAL STRESS TEST (WINDOW=15) ===")
@@ -130,10 +131,11 @@ def run_simulation():
     model.load_state_dict(torch.load("Shield_Unified.pth", map_location=DEVICE, weights_only=True))
     model.eval()
     
-    target_classes = ['Benign', 'DoS', 'Web Attack', 'Brute Force', 'PortScan', 'Botnet']
+    target_classes = ['Benign', 'DoS', 'Web Attack', 'Brute Force', 'PortScan', 'Botnet','DDoS']
     dna_seeds = {}
+    final_summary = [] # To store final results for a clean print
     
-    # Extract Seeds
+    # Extract Seeds (Existing logic)
     files = glob.glob(os.path.join(DATASET_DIR, "**/*.csv"), recursive=True)
     for f in files:
         if len(dna_seeds) == len(target_classes): break
@@ -153,52 +155,69 @@ def run_simulation():
                         dna_seeds[cls] = cls_df[features].iloc[0].values.tolist()
         except: continue
 
+    if 'Benign' not in dna_seeds:
+        print("Critical Error: Could not find Benign seed for camouflage.")
+        return
+
     benign_seed = dna_seeds['Benign']
-    print("\n⚠️  EVASION ACTIVE: 25% Mutation | 15% Erasure | Temporal Jitter (1:4)")
+    print("\nEVASION ACTIVE: 25% Mutation | 15% Erasure | Temporal Jitter (1:4)")
 
     for cls, seed_row in dna_seeds.items():
-        if cls == 'Benign': continue 
-        
-        print(f"\n💀 ATTACKING: {cls.upper()}")
-        
-        '''raw_traffic = generate_brutal_traffic(seed_row, benign_seed, num_samples=600)
-        scaled_traffic = scaler.transform(raw_traffic)
-        
-        dist = {}
-        buffer = []'''
-        # ... (inside run_simulation)
-        raw_traffic = generate_brutal_traffic(seed_row, benign_seed, num_samples=600)
-        
-        # WE CHANGE THIS LOOP:
-        dist = {}
-        for row in raw_traffic: # Send RAW data to the API
-            fake_ip = f"192.168.1.{random.randint(2, 254)}"
+        if cls == 'Benign': continue
 
-            payload = {
-                "features": row,
-                "src_ip": fake_ip, # Now it will show as 192.168.1.x
-                "dst_ip": "10.0.0.5"
-            }
-            
+        print(f"\nTESTING ATTACK CLASS: {cls.upper()}")
+        raw_traffic = generate_brutal_traffic(seed_row, benign_seed, num_samples=600)
+
+        dist = {}
+        for row in raw_traffic:
+            # 1. Check if demo was stopped WITHOUT killing the whole script
             try:
-                # This is the "bridge" that sends data to your website
-                response = requests.post("http://127.0.0.1:5000/predict", json=payload)
-                
+                health = requests.get("http://127.0.0.1:5000/health", timeout=1).json()
+                if not health.get("demo_running", False):
+                    print(f"Stop signal received. Ending test for {cls} early.")
+                    break # This exits the packet loop for THIS class but keeps the script alive
+            except:
+                print("Connection lost to backend.")
+                break
+
+            # 2. Proceed with prediction if demo is still running
+            fake_ip = f"192.168.1.{random.randint(2, 254)}"
+            payload = {"features": row, "src_ip": fake_ip, "dst_ip": "10.0.0.5"}
+
+            try:
+                response = requests.post("http://127.0.0.1:5000/predict", json=payload, timeout=2)
                 if response.status_code == 200:
                     result = response.json()
                     pred_label = result.get("prediction")
                     dist[pred_label] = dist.get(pred_label, 0) + 1
-            except Exception as e:
-                print(f"❌ Failed to reach backend: {e}")
+            except:
                 break
-        
-        correct = dist.get(cls, 0)
-        total = sum(dist.values())
-        accuracy = (correct / total) * 100 if total > 0 else 0
-        print(f"📊 Robustness Score: {accuracy:.1f}%")
-        print("Breakdown:")
-        for k, v in sorted(dist.items(), key=lambda x: x[1], reverse=True):
-            print(f"  -> {k.ljust(15)} : {v}")
+
+        if dist:
+            correct = dist.get(cls, 0)
+            total = sum(dist.values())
+            accuracy = (correct / total) * 100 if total > 0 else 0
+            
+            # Print individual result
+            print(f"{cls} Robustness Score: {accuracy:.2f}%")
+            print("   Detailed Predictions:")
+            for k, v in sorted(dist.items(), key=lambda x: x[1], reverse=True):
+                print(f"    - {k.ljust(15)} : {v}")
+            
+            # Save for final summary
+            final_summary.append({"Class": cls, "Score": f"{accuracy:.2f}%", "Total": total})
+        else:
+            print(f"Failed to receive any results for {cls}.")
+
+    # --- FINAL SUMMARY TABLE ---
+    print("\n" + "="*50)
+    print("      FINAL ADVERSARIAL ROBUSTNESS REPORT")
+    print("="*50)
+    print(f"{'Attack Class'.ljust(20)} | {'Robustness'.ljust(12)} | {'Samples'}")
+    print("-" * 50)
+    for entry in final_summary:
+        print(f"{entry['Class'].ljust(20)} | {entry['Score'].ljust(12)} | {entry['Total']}")
+    print("="*50)
 
 if __name__ == "__main__":
     run_simulation()
