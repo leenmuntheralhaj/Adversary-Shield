@@ -2,12 +2,13 @@ Adversary Shield — Setup & Access Guide
 Prerequisites
 Download all project files including the dataset CSV files and the Test_inject folder before proceeding.
 Setup Steps
-1. Prepare the dataset
+1.Datasets are in this folder: https://drive.google.com/drive/folders/1crMDeJjkZKLbMyqIOxODt1IVTT1cXkfX?usp=drive_link
+2. Prepare the dataset
 Run GP2.py to process and load the model before starting the application.
-2. Configure email for OTP
+3. Configure email for OTP
 In app.py, locate the email configuration section and insert your Gmail address and your 16-character app password — this is generated from your Google account under Two-Factor Authentication → App Passwords.
 In script.js, locate the email field and update it with the same Gmail address so OTP codes are sent to you correctly.
-3. Start the application
+4. Start the application
 Run app.py to launch the backend server, then open the interface in your browser.
 
 Signing In
