@@ -210,7 +210,7 @@ def send_otp():
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
             server.sendmail(SMTP_EMAIL, email, msg.as_string())
         return jsonify({"status": "success"})
-        #return jsonify({"status": "success", "otp": otp}) #for the doctors to test easily
+        #return jsonify({"status": "success", "otp": otp}) #for the users to test easily and have a live demo code shown without checking their email 
     except Exception as e:
         print("Email error:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
