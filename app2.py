@@ -17,7 +17,7 @@ from email.mime.multipart import MIMEMultipart
 import  platform
 
 
-
+#edit line 162,163 to write your email and generated password for 2FA
 demo_running = False
 # 1. FLASK APP SETUP
 app = Flask(__name__)
@@ -159,8 +159,8 @@ def get_events():
     return jsonify(list(reversed(db["events"]))[:int(request.args.get('limit', 50))])
 
 # ---- email config ----
-SMTP_EMAIL    = "leenalhaj4@gmail.com" #write your email
-SMTP_PASSWORD = "zvic foph vpxt nwvi"   # Generate 2FA OTP mail password from your google account
+SMTP_EMAIL    = "youremail@gmail.com" #write your email
+SMTP_PASSWORD = "xxxx xxxx xxxx xxxx"   # Generate 2FA OTP mail password from your google account
 
 # in-memory OTP store  {username: {"otp": "123456", "expires": timestamp}}
 _otp_store = {}
