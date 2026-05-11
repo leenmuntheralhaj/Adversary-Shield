@@ -1,5 +1,5 @@
 console.log("script.js loaded");
-
+//edit lines 14,15,16 to write your email to get your verification code in it to access the system
 const API_BASE = "http://127.0.0.1:5000";
 const LIMITS = {
   fetchEvents: 10000, fetchAlerts: 10000, dashboardEvents: 50, dashboardAlerts: 50,
