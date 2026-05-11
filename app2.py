@@ -8,7 +8,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from datetime import datetime
 from threading import Thread
-from Test_ingect import run_simulation
+from test import run_simulation
 import smtplib
 import random
 import string
@@ -96,8 +96,10 @@ def get_risk_level(prediction, confidence):
 @app.route('/health', methods=['GET'])
 def health_check():
     return jsonify({
-        "status": "ok"
+        "status": "ok",
+        "demo_running": demo_running
     })
+    
 
 @app.route('/schema', methods=['GET'])
 def get_schema():
@@ -109,25 +111,25 @@ def get_stats():
         events = db.get("events", [])
         alerts = db.get("alerts", [])
 
-        # ✅ Unique devices (ignore empty/unknown)
+        #  Unique devices (ignore empty/unknown)
         unique_devices = len(set(
             e.get("src_ip") for e in events
             if e.get("src_ip") and e.get("src_ip") != "unknown"
         ))
 
-        # ✅ Count ALL attack types correctly
+        # Count ALL attack types correctly
         attack_counts = {}
         for a in alerts:
             label = a.get("prediction", "Unknown")
             attack_counts[label] = attack_counts.get(label, 0) + 1
 
-        # ✅ Convert to list (NO LIMIT HERE)
+        # Convert to list (NO LIMIT HERE)
         dist = [
             {"label": k, "count": v}
             for k, v in sorted(attack_counts.items(), key=lambda x: x[1], reverse=True)
         ]
 
-        # ✅ Latest threat (FIXED — use most recent alert)
+        # Latest threat (FIXED — use most recent alert)
         latest_threat = alerts[0]["prediction"] if len(alerts) > 0 else "None"
 
         return jsonify({
@@ -157,8 +159,8 @@ def get_events():
     return jsonify(list(reversed(db["events"]))[:int(request.args.get('limit', 50))])
 
 # ---- email config ----
-SMTP_EMAIL    = "youremail@gmail.com" # write your email
-SMTP_PASSWORD = "#### #### #### ####"   # Generate 2FA OTP mail password from your google account
+SMTP_EMAIL    = "leenalhaj4@gmail.com" #write your email
+SMTP_PASSWORD = "zvic foph vpxt nwvi"   # Generate 2FA OTP mail password from your google account
 
 # in-memory OTP store  {username: {"otp": "123456", "expires": timestamp}}
 _otp_store = {}
@@ -207,8 +209,8 @@ def send_otp():
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(SMTP_EMAIL, SMTP_PASSWORD)
             server.sendmail(SMTP_EMAIL, email, msg.as_string())
-        #return jsonify({"status": "success"})
-        return jsonify({"status": "success", "otp": otp}) #for the doctors to test easily
+        return jsonify({"status": "success"})
+        #return jsonify({"status": "success", "otp": otp}) #for the doctors to test easily
     except Exception as e:
         print("Email error:", e)
         return jsonify({"status": "error", "message": str(e)}), 500
@@ -343,8 +345,8 @@ def get_responses():
     return jsonify(list(reversed(db["responses"]))[:int(request.args.get('limit', 50))])
 
 
-@app.route('/start_demo', methods=['POST'])
 
+@app.route('/start_demo', methods=['POST'])
 def start_demo():
     global demo_running
 
@@ -354,11 +356,19 @@ def start_demo():
     demo_running = True
     Thread(target=run_simulation, daemon=True).start()
 
-    return jsonify({"status": "success"})
+    return jsonify({
+        "status": "success",
+        "max_event_id": db["event_id_counter"] - 1,
+        "max_alert_id": len(db["alerts"])
+    })
 @app.route("/stop_demo", methods=["POST"])
 def stop_demo():
     global demo_running
     demo_running = False
-    return jsonify({"status": "stopped"})
+    return jsonify({
+        "status": "stopped",
+        "max_event_id": db["event_id_counter"] - 1,
+        "max_alert_id": len(db["alerts"])
+    })
 if __name__ == '__main__':
     app.run(host='127.0.0.1', port=5000, debug=False)
